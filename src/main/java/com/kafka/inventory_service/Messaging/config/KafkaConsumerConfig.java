@@ -63,7 +63,11 @@ public class KafkaConsumerConfig{
 
     @Bean
     public ConsumerFactory<String, BaseEvent<ProductPayload>> consumerFactory(){
-        return new DefaultKafkaConsumerFactory<>(consumerConfigs(),new StringDeserializer(),new ProductEventDeserializer());
+        // LINE 1: Wrap your original custom deserializer inside the safety shield
+        org.springframework.kafka.support.serializer.ErrorHandlingDeserializer<BaseEvent<ProductPayload>> safeDeserializer =
+                new org.springframework.kafka.support.serializer.ErrorHandlingDeserializer<>(new ProductEventDeserializer());
+        // LINE 2: Pass the safeDeserializer instead of the raw one
+        return new DefaultKafkaConsumerFactory<>(consumerConfigs(),new StringDeserializer(),safeDeserializer);
     }
 
     @Bean
