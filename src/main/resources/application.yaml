@@ -21,7 +21,8 @@ spring:
 
   kafka:
     consumer:
-      bootstrap-servers: localhost:9092,localhost:9094
+      # Uses the Docker environment variable if present; defaults to your local setup if not
+      bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092,localhost:9094}
       group-id: inventory-service-group
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       #      value-deserializer: org.springframework.kafka.support.serializer.JacksonJsonDeserializer

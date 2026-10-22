@@ -1,0 +1,97 @@
+version: '3.8'
+
+services:
+  # 1. DATABASE SERVICE: MySQL 8.4 LTS
+  mysql-db:
+    image: mysql:8.4
+    container_name: inventory-mysql-db
+    ports:
+      - "3309:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: kafka_inventory
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - inventory-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 2. MESSAGING SERVICE: Apache Kafka (KRaft Mode)
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: inventory-kafka-broker
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:29093'
+      KAFKA_LISTENERS: 'PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9092'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+    networks:
+      - inventory-network
+
+  # -----------------------------------------------------------------------
+  # PLACE IT HERE: Right below the kafka service, matching its indentation!
+  # -----------------------------------------------------------------------
+  kafka-init-topics:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: inventory-kafka-init-topics
+    depends_on:
+      - kafka
+    entrypoint: [ "/bin/sh", "-c" ]
+    command: |
+      "
+      echo 'Waiting for Kafka broker to start...'
+      cub kafka-ready -b kafka:29092 1 30
+      
+      echo 'Creating production Kafka topics...'
+      kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists --topic product-events --partitions 3 --replication-factor 1
+      kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists --topic product-events-dlt --partitions 1 --replication-factor 1
+      
+      echo 'Kafka topics initialization complete!'
+      "
+    networks:
+      - inventory-network
+
+  # 4. BACKEND MICROSERVICE: Spring Boot Inventory App
+  inventory-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: inventory-service-app
+    ports:
+      - "8083:8083"
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql-db:3306/kafka_inventory
+      - SPRING_DATASOURCE_USERNAME=root
+      - SPRING_DATASOURCE_PASSWORD=root
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - SPRING_KAFKA_CONSUMER_BOOTSTRAP_SERVERS=kafka:29092
+    depends_on:
+      mysql-db:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    networks:
+      - inventory-network
+
+volumes:
+  mysql_data:
+
+networks:
+  inventory-network:
+    driver: bridge
